@@ -9,3 +9,6 @@ whitenoise
 gunicorn
 stripe
 psycopg2-binary
+ipython
+pandas
+sqlalchemy
