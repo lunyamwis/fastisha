@@ -1,0 +1,107 @@
+{
+  "name": "alhusnain chatbot v2",
+  "nodes": [
+    { "id": "Start", "name": "Start", "type": "n8n-nodes-base.start", "position": [100,100] },
+
+    { "id": "Webhook", "name": "Chat Webhook", "type": "n8n-nodes-base.webhook", "position": [100,300],
+      "parameters": { "path": "extreme-chat", "responseMode": "lastNode" } },
+
+    { "id": "LoadMemory", "name": "Load Conversation Memory", "type": "n8n-nodes-base.function", "position": [300,300],
+      "parameters": { "functionCode": "global.memory=global.memory||[];return [{json:{memory:global.memory}}];" } },
+
+    { "id": "IntentLLM", "name": "Intent Classification", "type": "n8n-nodes-base.openAi", "position": [500,300],
+      "parameters": { "model":"gpt-4o-mini","messages":[{"role":"system","content":"Classify intent: lookup, aggregate, compare, clarify, chitchat"},{"role":"user","content":"{{$json.body.message}}"}] },
+      "credentials": { "openAiApi": { "id":"OPENAI","name":"OpenAI"} } },
+
+    { "id": "RewriteQuery", "name": "Query Rewriter", "type": "n8n-nodes-base.openAi", "position": [700,300],
+      "parameters": { "model":"gpt-4o-mini","messages":[{"role":"system","content":"Rewrite query into clean search intent + filters JSON"},{"role":"user","content":"{{$json.body.message}}"}] },
+      "credentials": { "openAiApi": { "id":"OPENAI","name":"OpenAI"} } },
+
+    { "id": "ValidateQuery", "name": "Validate Query", "type": "n8n-nodes-base.if", "position": [900,300],
+      "parameters": { "conditions": { "string":[{"value1":"={{$json.choices[0].message.content}}","operation":"isNotEmpty"}] } } },
+
+    { "id": "ReadCSV", "name": "Read CSV", "type": "n8n-nodes-base.readBinaryFile", "position": [300,100],
+      "parameters": { "filePath":"/data/knowledge.csv" } },
+
+    { "id": "CSVtoJSON", "name": "CSV to JSON", "type": "n8n-nodes-base.spreadsheetFile", "position": [500,100],
+      "parameters": { "operation":"toJson","options":{"headerRow":true} } },
+
+    { "id": "NormalizeCSV", "name": "Normalize CSV Rows", "type": "n8n-nodes-base.function", "position": [700,100],
+      "parameters": { "functionCode":"return items.map((i,n)=>({json:{...i.json,row_id:n,search:Object.values(i.json).join(' ')}}));" } },
+
+    { "id": "CSVEmbed", "name": "CSV Embeddings", "type": "n8n-nodes-base.openAi", "position": [900,100],
+      "parameters": { "model":"text-embedding-3-small","text":"={{$json.search}}" },
+      "credentials": { "openAiApi": { "id":"OPENAI","name":"OpenAI"} } },
+
+    { "id": "StoreCSVVectors", "name": "Store CSV Vectors", "type": "n8n-nodes-base.function", "position": [1100,100],
+      "parameters": { "functionCode":"global.csvVectors=global.csvVectors||[];items.forEach(i=>global.csvVectors.push(i.json));return items;" } },
+
+    { "id": "PostgresRead", "name": "Postgres Read", "type": "n8n-nodes-base.postgres", "position": [300,500],
+      "parameters": { "operation":"executeQuery","query":"SELECT * FROM knowledge_base;" } },
+
+    { "id": "NormalizePG", "name": "Normalize Postgres Rows", "type": "n8n-nodes-base.function", "position": [500,500],
+      "parameters": { "functionCode":"return items.map((i,n)=>({json:{...i.json,pg_id:n,search:Object.values(i.json).join(' ')}}));" } },
+
+    { "id": "PGEmbed", "name": "Postgres Embeddings", "type": "n8n-nodes-base.openAi", "position": [700,500],
+      "parameters": { "model":"text-embedding-3-small","text":"={{$json.search}}" },
+      "credentials": { "openAiApi": { "id":"OPENAI","name":"OpenAI"} } },
+
+    { "id": "StorePGVectors", "name": "Store PG Vectors", "type": "n8n-nodes-base.function", "position": [900,500],
+      "parameters": { "functionCode":"global.pgVectors=global.pgVectors||[];items.forEach(i=>global.pgVectors.push(i.json));return items;" } },
+
+    { "id": "EmbedUserQuery", "name": "Embed User Query", "type": "n8n-nodes-base.openAi", "position": [1100,300],
+      "parameters": { "model":"text-embedding-3-small","text":"={{$json.body.message}}" },
+      "credentials": { "openAiApi": { "id":"OPENAI","name":"OpenAI"} } },
+
+    { "id": "MergeVectors", "name": "Merge CSV + PG Vectors", "type": "n8n-nodes-base.function", "position": [1300,300],
+      "parameters": { "functionCode":"const all=[...(global.csvVectors||[]),...(global.pgVectors||[])];return [{json:{vectors:all,query:items[0].json.embedding}}];" } },
+
+    { "id": "SimilaritySearch", "name": "Similarity Search", "type": "n8n-nodes-base.function", "position": [1500,300],
+      "parameters": { "functionCode":"function c(a,b){let s=0,sa=0,sb=0;for(let i=0;i<a.length;i++){s+=a[i]*b[i];sa+=a[i]*a[i];sb+=b[i]*b[i];}return s/(Math.sqrt(sa)*Math.sqrt(sb));}\nconst res=$json.vectors.map(r=>({...r,score:c(r.embedding,$json.query)})).sort((a,b)=>b.score-a.score).slice(0,8);\nreturn [{json:{results:res}}];" } },
+
+    { "id": "AggregateCheck", "name": "Aggregation Router", "type": "n8n-nodes-base.switch", "position": [1700,300],
+      "parameters": { "value1":"={{$json.intent}}","rules":[{"value2":"aggregate","operation":"equal"}] } },
+
+    { "id": "Aggregator", "name": "Aggregation Engine", "type": "n8n-nodes-base.function", "position": [1900,200],
+      "parameters": { "functionCode":"return [{json:{summary:`Count: ${$json.results.length}`}}];" } },
+
+    { "id": "AnswerLLM", "name": "Answer Generator", "type": "n8n-nodes-base.openAi", "position": [1900,400],
+      "parameters": { "model":"gpt-4o-mini","messages":[{"role":"system","content":"Answer strictly from provided data."},{"role":"user","content":"{{$json.results}}"}] },
+      "credentials": { "openAiApi": { "id":"OPENAI","name":"OpenAI"} } },
+
+    { "id": "SelfCritic", "name": "Answer Validator", "type": "n8n-nodes-base.openAi", "position": [2100,400],
+      "parameters": { "model":"gpt-4o-mini","messages":[{"role":"system","content":"Validate answer for hallucinations."},{"role":"user","content":"{{$json.choices[0].message.content}}"}] },
+      "credentials": { "openAiApi": { "id":"OPENAI","name":"OpenAI"} } },
+
+    { "id": "ConfidenceScore", "name": "Confidence Scoring", "type": "n8n-nodes-base.function", "position": [2300,400],
+      "parameters": { "functionCode":"return [{json:{answer:$json.choices[0].message.content,confidence:0.92}}];" } },
+
+    { "id": "StoreMemory", "name": "Store Conversation Memory", "type": "n8n-nodes-base.function", "position": [2500,400],
+      "parameters": { "functionCode":"global.memory.push($json.answer);return items;" } },
+
+    { "id": "Respond", "name": "Respond", "type": "n8n-nodes-base.respondToWebhook", "position": [2700,400],
+      "parameters": { "responseBody":"={{$json.answer}}" } }
+  ],
+  "connections": {
+    "Start": { "main": [[{ "node":"Read CSV","type":"main","index":0 }]] },
+    "Read CSV": { "main": [[{ "node":"CSV to JSON","type":"main","index":0 }]] },
+    "CSV to JSON": { "main": [[{ "node":"Normalize CSV Rows","type":"main","index":0 }]] },
+    "Normalize CSV Rows": { "main": [[{ "node":"CSV Embeddings","type":"main","index":0 }]] },
+    "CSV Embeddings": { "main": [[{ "node":"Store CSV Vectors","type":"main","index":0 }]] },
+
+    "Chat Webhook": { "main": [[{ "node":"Load Conversation Memory","type":"main","index":0 }]] },
+    "Load Conversation Memory": { "main": [[{ "node":"Intent Classification","type":"main","index":0 }]] },
+    "Intent Classification": { "main": [[{ "node":"Query Rewriter","type":"main","index":0 }]] },
+    "Query Rewriter": { "main": [[{ "node":"Validate Query","type":"main","index":0 }]] },
+    "Validate Query": { "main": [[{ "node":"Embed User Query","type":"main","index":0 }]] },
+
+    "Embed User Query": { "main": [[{ "node":"Merge CSV + PG Vectors","type":"main","index":0 }]] },
+    "Merge CSV + PG Vectors": { "main": [[{ "node":"Similarity Search","type":"main","index":0 }]] },
+    "Similarity Search": { "main": [[{ "node":"Aggregation Router","type":"main","index":0 }]] },
+    "Aggregation Router": { "main": [[{ "node":"Answer Generator","type":"main","index":0 }]] },
+    "Answer Generator": { "main": [[{ "node":"Answer Validator","type":"main","index":0 }]] },
+    "Answer Validator": { "main": [[{ "node":"Confidence Scoring","type":"main","index":0 }]] },
+    "Confidence Scoring": { "main": [[{ "node":"Store Conversation Memory","type":"main","index":0 }]] },
+    "Store Conversation Memory": { "main": [[{ "node":"Respond","type":"main","index":0 }]] }
+  }
+}

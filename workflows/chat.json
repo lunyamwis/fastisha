@@ -1,0 +1,156 @@
+{
+  "name": "Alhusnain Chatbot",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "Start",
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "path": "csv-chatbot",
+        "responseMode": "lastNode"
+      },
+      "id": "Webhook",
+      "name": "Chat Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 500]
+    },
+    {
+      "parameters": {
+        "filePath": "/data/knowledge.csv"
+      },
+      "id": "ReadCSV",
+      "name": "Read CSV",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "toJson",
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "CSVtoJSON",
+      "name": "CSV → JSON",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "return items.map((item, index) => ({ json: { ...item.json, row_id: index, source: \"csv\", ingested_at: new Date().toISOString(), searchable_text: Object.values(item.json).join(\" \") } }));"
+      },
+      "id": "Normalize",
+      "name": "Normalize + Enrich",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "text": "={{$json.searchable_text}}"
+      },
+      "id": "EmbedRows",
+      "name": "Generate Embeddings",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "global.embeddingStore = global.embeddingStore || [];\nitems.forEach(i => global.embeddingStore.push(i.json));\nreturn items;"
+      },
+      "id": "StoreVectors",
+      "name": "Store In-Memory Vector Store",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const userQuery = $json.body.message;\nconst store = global.embeddingStore || [];\n\nfunction cosine(a,b){let s=0,sa=0,sb=0;for(let i=0;i<a.length;i++){s+=a[i]*b[i];sa+=a[i]*a[i];sb+=b[i]*b[i];}return s/(Math.sqrt(sa)*Math.sqrt(sb));}\n\nconst results = store.map(r => ({ ...r, score: cosine(r.embedding, $json.query_embedding) }))\n  .sort((a,b)=>b.score-a.score)\n  .slice(0,5);\n\nreturn [{ json: { results } }];"
+      },
+      "id": "SimilaritySearch",
+      "name": "Vector Similarity Search",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 600]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": [
+          {
+            "role": "system",
+            "content": "You are a chatbot that answers strictly from provided CSV data. If the answer is not present, say you do not know."
+          },
+          {
+            "role": "user",
+            "content": "User question: {{$json.body.message}}\n\nRelevant rows:\n{{$json.results}}"
+          }
+        ]
+      },
+      "id": "AnswerLLM",
+      "name": "Generate Answer",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [900, 600],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "responseBody": "={{$json.choices[0].message.content}}"
+      },
+      "id": "Respond",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1100, 600]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [[{ "node": "Read CSV", "type": "main", "index": 0 }]]
+    },
+    "Read CSV": {
+      "main": [[{ "node": "CSV → JSON", "type": "main", "index": 0 }]]
+    },
+    "CSV → JSON": {
+      "main": [[{ "node": "Normalize + Enrich", "type": "main", "index": 0 }]]
+    },
+    "Normalize + Enrich": {
+      "main": [[{ "node": "Generate Embeddings", "type": "main", "index": 0 }]]
+    },
+    "Generate Embeddings": {
+      "main": [[{ "node": "Store In-Memory Vector Store", "type": "main", "index": 0 }]]
+    },
+    "Chat Webhook": {
+      "main": [[{ "node": "Vector Similarity Search", "type": "main", "index": 0 }]]
+    },
+    "Vector Similarity Search": {
+      "main": [[{ "node": "Generate Answer", "type": "main", "index": 0 }]]
+    },
+    "Generate Answer": {
+      "main": [[{ "node": "Send Response", "type": "main", "index": 0 }]]
+    }
+  }
+}
