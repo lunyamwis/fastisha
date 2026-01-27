@@ -150,3 +150,4 @@ def start_trial(request):
     
     messages.success(request, 'Trial period started successfully.')
     return redirect('dashboard:settings') 
+
