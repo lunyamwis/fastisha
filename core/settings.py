@@ -30,8 +30,19 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-default-key-change-me')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
+ALLOWED_HOSTS = [
+    "fastisha.com",
+    "www.fastisha.com",
+    "localhost",
+    "127.0.0.1",
+    "web",                 # docker service name
+    "38.242.150.81",  
+]
+CSRF_TRUSTED_ORIGINS = [
+    "https://fastisha.com",
+    "https://www.fastisha.com",
+]
 
 # Application definition
 
