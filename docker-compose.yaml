@@ -110,3 +110,5 @@ volumes:
   postgres_data:
   static_volume:
   n8n_data:
+  certbot_etc:
+  certbot_var:
