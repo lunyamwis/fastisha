@@ -233,6 +233,8 @@ STATIC_URL = "static/"
 # Prefer production-ish config (whitenoise) but keep CRM's simple paths compatible.
 STATIC_ROOT = os.getenv("STATIC_ROOT", str(BASE_DIR / "staticfiles"))
 STATICFILES_DIRS = [str(BASE_DIR / "static")] if (BASE_DIR / "static").exists() else []
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -348,8 +350,8 @@ NAME_PREFIXES = [
 
 WEB_HELP = True
 
-COPYRIGHT_STRING = f"Django-CRM. Copyright (c) {dt.now().year}"
-PROJECT_NAME = "Django-CRM"
+COPYRIGHT_STRING = f"Fastisha. Copyright (c) {dt.now().year}"
+PROJECT_NAME = "Fastisha"
 PROJECT_SITE = "https://djangocrm.github.io/info/"
 
 # ---- Testing overrides ---- #
